@@ -1,0 +1,76 @@
+// 
+// Collect terms in sums.
+//
+// The user should define ble, the <= relation for a strict ordering on terms.
+//
+// Programs that rearrange formulae of raising and lowering operators to normal order need to represent sums.  They mainly operate on these sums in two ways: extracting the worst-ordered term to reduce it, and adding new terms which need to be collected with similar existing terms.
+//
+// These operations are supported by binary search trees.  Formulae are supplied by the user, with terms in anything but random order; programs then delete the largest terms, and insert smaller ones; thus the trees will be badly balanced, and lists associating terms with coefficients will be simpler and just as efficient.  That is what this code does.
+//
+// Today's goal: automatically derive the V matrix for a single mode.
+//
+
+// Sums are reduced to a standard order, and like terms collected, by the "collect" function.  For now, the order assumes everything is fully expanded: there are no sums within terms.  coefficients are factored out from bases before ordering.
+// Worse ordered terms come first.  terms of the same disorder compare throught str.
+
+collect = reduce with
+	x+y = (coeff x+coeff y)*base x if base x === base y && ~(base x === 1);
+		= y+x if prior (base y) (base x);
+
+	prior x y = dx > dy || dx == dy && str x > str y
+		when dx = disorder x; dy = disorder y; end;
+end;
+
+// The constructors mk and tk denote raising and lowering operators for a mode indexed by their arguments.
+
+// The disorder of a product that includes raising and lowering operators is the sum, over lowering operators, of the raising operators for the same mode to its right.  Exchanging "raising" and "lowering" gives the same result.
+
+power_of (_+_) = throw "over complicated argument";
+power_of (_*_) = throw "over complicated argument";
+power_of (_^_) = throw "over complicated argument";
+power_of x = ffold (step x) 0 with
+  step x n x = n+1;
+  step _ _ (_+_) = throw "invalid argument";
+  step x n (x^m) = n+m;
+  step _ n _ = n;
+end;
+
+disorder ((tk i)*x) = disorder x + power_of (mk i) x;
+disorder (_*x) = disorder x;
+disorder _ = 0;
+
+//
+// General formula reductions
+//
+
+x+0 = x;  0+x = x;
+0*_ = 0;  _*0 = 0;
+1*x = x;  x*1 = x;
+
+_^0 = 1;
+x^1 = x;
+
+a+(b+c)=a+b+c;
+a*(b*c)=a*b*c;
+
+expand = reduce with
+  (a+b)*c = a*c+b*c;
+  a*(b+c) = a*b+a*c;
+  a^n::int = a*a^(n-1) if n>1;
+end;
+
+// Break factor into coefficient and base
+
+cb = ffold f (1,1) with
+	f (c,b) n::number = (c*n),b;
+	f (c,b) x = c,(b*x);
+end;
+
+base = (!1) . cb;
+coeff = (!0) . cb;
+
+// Fold over factors
+// Todo: a version that breaks down integer powers to factors.
+
+ffold f x (l*r) = ffold f (ffold f x l) r;
+ffold f x y = f x y;
