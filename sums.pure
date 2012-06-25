@@ -3,6 +3,8 @@
 //
 // The user should define ble, the <= relation for a strict ordering on terms.
 //
+// Uses expansion code by Gräf.
+//
 // Programs that rearrange formulae of raising and lowering operators to normal order need to represent sums.  They mainly operate on these sums in two ways: extracting the worst-ordered term to reduce it, and adding new terms which need to be collected with similar existing terms.
 //
 // These operations are supported by binary search trees.  Formulae are supplied by the user, with terms in anything but random order; programs then delete the largest terms, and insert smaller ones; thus the trees will be badly balanced, and lists associating terms with coefficients will be simpler and just as efficient.  That is what this code does.
@@ -10,34 +12,70 @@
 // Today's goal: automatically derive the V matrix for a single mode.
 //
 
-// Sums are reduced to a standard order, and like terms collected, by the "collect" function.  For now, the order assumes everything is fully expanded: there are no sums within terms.  coefficients are factored out from bases before ordering.
-// Worse ordered terms come first.  terms of the same disorder compare throught str.
 
-collect = reduce with
-	x+y = (coeff x+coeff y)*base x if base x === base y && ~(base x === 1);
-		= y+x if prior (base y) (base x);
+// The new strategy is to expand the expression, convert the sum of products to a linear combination, reduce items in the combination, convert back to an expression, and let the general reductions tidy it up.
 
-	prior x y = dx > dy || dx == dy && str x > str y
-		when dx = disorder x; dy = disorder y; end;
+// The linear combination interface requires that we can add linear combinations to each other, and to term=>coefficient hash pairs, and that we can find a least term under a partial order.
+
+interface lcmb
+with
+	_::lcmb + _::lcmb;
+	(_=>_::number) + _::lcmb;
+	_::lcmb + (_=>_::number);
+	coefficient _ _::lcmb;
+	leading_term p _::lcmb;
 end;
 
-// The constructors mk and tk denote raising and lowering operators for a mode indexed by their arguments.
+// Linear combinations as lists of (factor list=>coefficient) hash pairs.  These must be wrapped in a constructor, because + is used for list concatenation.
+	
 
-// The disorder of a product that includes raising and lowering operators is the sum, over lowering operators, of the raising operators for the same mode to its right.  Exchanging "raising" and "lowering" gives the same result.
+coefficient xs (llc []) = 0;
+coefficient xs (llc ((xs=>c::number):_)) = c;
+coefficient xs (llc (_:xss)) = coefficient xs (llc xss);
 
-power_of (_+_) = throw "over complicated argument";
-power_of (_*_) = throw "over complicated argument";
-power_of (_^_) = throw "over complicated argument";
-power_of x = ffold (step x) 0 with
-  step x n x = n+1;
-  step _ _ (_+_) = throw "invalid argument";
-  step x n (x^m) = n+m;
-  step _ n _ = n;
+(xs=>c::number) + llc [] | llc [] + (xs=>c::number) = llc [xs=>c];
+(xs=>c::number) + llc ((xs=>d::number):yss) | llc ((xs=>d::number):yss) + (xs=>c::number) =
+	llc ((xs=>c+d):yss);
+a@(_=>_::number) + llc (ys:yss) | llc (ys:yss) + a@(_=>_::number) =
+	llc (ys:bss) when llc bss = a+llc yss; end;
+	
+llc xs + y@(llc _) = foldl (+) y xs;
+	
+// tests
+
+let tl = llc [[x]=>1,[y,z]=>2];
+
+coefficient [z] tl == 0 || throw 0;
+coefficient [x] tl ==1 || throw 1;
+coefficient [y,z] tl == 2 || throw 2;
+
+coefficient [x] (([x]=>5) + llc []) == 5 || throw 3;
+coefficient [x] (tl + ([x]=>5)) == 6 || throw 4;
+coefficient [y] (tl + ([y]=>4)) == 4 || throw 5;
+
+coefficient [y,z] (tl+tl) == 4 || throw 6;
+
+
+// Expand takes any of an expression, a linear combination of expressions, or a linear combination of factor lists.  It returns the latter.  Collect extracts numerical coefficients from the lists of factors in a linear combination.  A linear combination is a term=>coefficient dictionary.
+
+expand = reduce with
+  (a+b)*c = a*c+b*c;
+  a*(b+c) = a*b+a*c;
+  a^n::int = a*a^(n-1) if n>1;
 end;
 
-disorder ((tk i)*x) = disorder x + power_of (mk i) x;
-disorder (_*x) = disorder x;
-disorder _ = 0;
+// lists of terms and factors
+
+terms (x+y) = terms x+terms y;
+terms x = [x] otherwise;
+factors (x*y) = factors x+factors y;
+factors x = [x] otherwise;
+
+normalise = map (cb.factors) . terms . expand
+with
+	cb xs = (foldl (*) 1 $ filter numberp xs), filter ((~).numberp) xs;
+end;
+
 
 //
 // General formula reductions
@@ -52,12 +90,6 @@ x^1 = x;
 
 a+(b+c)=a+b+c;
 a*(b*c)=a*b*c;
-
-expand = reduce with
-  (a+b)*c = a*c+b*c;
-  a*(b+c) = a*b+a*c;
-  a^n::int = a*a^(n-1) if n>1;
-end;
 
 // Break factor into coefficient and base
 
